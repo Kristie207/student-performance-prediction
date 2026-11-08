@@ -1,13 +1,14 @@
-# Student Performance Prediction
+# EduPredict – Student Performance Analytics
 
-Ứng dụng Streamlit phân tích dữ liệu và dự đoán xếp loại học tập bằng Machine Learning.
+Ứng dụng Streamlit hỗ trợ khám phá dữ liệu, so sánh thuật toán Machine Learning và dự đoán xếp loại học tập của sinh viên.
 
-## Tính năng
-- Tổng quan dữ liệu, phân bố xếp loại và điểm trung bình theo môn.
-- Huấn luyện và đánh giá Logistic Regression, Decision Tree và Random Forest.
-- Hiển thị Accuracy, Precision, Recall, F1-score, confusion matrix và classification report.
-- Nhập thông tin sinh viên để dự đoán Grade và xác suất theo từng nhóm.
-- Tải dữ liệu đang sử dụng về định dạng CSV.
+## Điểm nổi bật
+- **Dashboard tổng quan:** KPI, phân bố xếp loại, điểm trung bình theo môn, điểm theo nhóm xếp loại và tình trạng luyện thi.
+- **So sánh mô hình:** Logistic Regression, Decision Tree và Random Forest trên cùng tập kiểm tra.
+- **Đánh giá mô hình:** Accuracy, Precision, Recall, F1-score weighted, confusion matrix và classification report.
+- **Dự đoán tương tác:** nhập thông tin học tập, chọn mô hình và xem xếp loại dự đoán cùng xác suất từng lớp.
+- **Khám phá dữ liệu:** lọc theo xếp loại, xem bảng dữ liệu và tải CSV.
+- **Tải dữ liệu Excel:** có thể sử dụng file mặc định trong repository hoặc tải một file khác qua sidebar.
 
 ## Cấu trúc dự án
 ```
@@ -15,28 +16,28 @@ student-performance-prediction/
 ├── app.py
 ├── requirements.txt
 ├── README.md
-└── Nhóm3_Studentperformanceprediction.xlsx  # thêm file dữ liệu này để tự nạp dữ liệu
+└── Nhóm3_Studentperformanceprediction.xlsx
 ```
 
 ## Chạy ứng dụng trên máy tính
+
 Yêu cầu Python 3.10 trở lên.
 
-1. Tải hoặc clone repository:
+1. Clone repository:
    ```bash
    git clone https://github.com/Kristie207/student-performance-prediction.git
    cd student-performance-prediction
    ```
-2. Cài đặt thư viện:
+2. Cài thư viện:
    ```bash
    pip install -r requirements.txt
    ```
-3. Chạy ứng dụng:
+3. Khởi chạy:
    ```bash
    streamlit run app.py
    ```
 
 ## Dữ liệu đầu vào
-Đưa file `Nhóm3_Studentperformanceprediction.xlsx` vào cùng thư mục với `app.py`. Nếu chưa thêm file này, ứng dụng vẫn chạy nhưng cần tải file Excel bằng ô tải tệp ở thanh bên trái.
 
 File Excel cần có các cột:
 - `gender`
@@ -49,14 +50,16 @@ File Excel cần có các cột:
 - `writing score`
 - `Grade`
 
-Không sử dụng `Average Score` làm đặc trưng đầu vào vì biến này được suy ra từ điểm các môn, có thể gây rò rỉ dữ liệu.
+Ứng dụng không sử dụng `Average Score` làm đặc trưng đầu vào vì biến này được tính từ điểm ba môn, có thể gây rò rỉ dữ liệu mục tiêu.
 
-## Triển khai miễn phí bằng Streamlit Community Cloud
-1. Đăng nhập tại https://share.streamlit.io/ bằng tài khoản GitHub.
+## Triển khai trên Streamlit Community Cloud
+
+1. Truy cập https://share.streamlit.io/ và đăng nhập bằng GitHub.
 2. Chọn **Create app**.
 3. Chọn repository `Kristie207/student-performance-prediction`, branch `main`, main file path `app.py`.
-4. Nhấn **Deploy**.
-5. Đảm bảo file Excel đã được thêm vào repository để ứng dụng tự nạp dữ liệu. Nếu chưa thêm, có thể tải file Excel trực tiếp trong thanh bên của ứng dụng.
+4. Chọn **Deploy**. Nếu ứng dụng đã được triển khai, Streamlit Cloud sẽ tự cập nhật sau khi nhận commit mới.
+5. Kiểm tra file Excel nằm ở thư mục gốc repository để ứng dụng tự nạp dữ liệu.
 
-## Lưu ý
-Các chỉ số được tính trên tập kiểm tra tách riêng. Kết quả dự đoán chỉ mang tính tham khảo, không thay thế đánh giá chính thức của nhà trường.
+## Lưu ý về đánh giá
+
+Các mô hình sử dụng cùng một cách chia tập train/test có phân tầng theo nhãn để so sánh công bằng hơn. F1-score weighted được trình bày cùng Accuracy, Precision và Recall nhằm phản ánh kết quả trong trường hợp số lượng mẫu giữa các nhóm xếp loại không cân bằng. Kết quả dự đoán chỉ mang tính tham khảo.
