@@ -1,233 +1,393 @@
 from pathlib import Path
 
-import streamlit as st
-import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
 
-from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.pipeline import Pipeline
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
-    classification_report, confusion_matrix, ConfusionMatrixDisplay
+    confusion_matrix, classification_report
 )
-from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
 
-st.set_page_config(page_title="Student Performance Prediction", page_icon="🎓", layout="wide")
-st.title("🎓 Student Performance Prediction")
-st.caption("Ứng dụng phân tích dữ liệu và dự đoán xếp loại học tập của sinh viên")
+# ---------------------------------------------------------
+# PAGE CONFIG & THEME
+# ---------------------------------------------------------
+st.set_page_config(
+    page_title="EduPredict | Student Analytics",
+    page_icon="🎓",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-DEFAULT_FILE = Path(__file__).parent / "Nhóm3_Studentperformanceprediction.xlsx"
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap');
+html, body, [class*="css"] { font-family: 'Be Vietnam Pro', sans-serif; }
+.stApp { background: #f4f7fb; }
+[data-testid="stSidebar"] { background: linear-gradient(180deg,#102746 0%,#173b63 100%); }
+[data-testid="stSidebar"] * { color: #f4f8ff !important; }
+[data-testid="stSidebar"] [data-testid="stSelectbox"] div,
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section { color: #102746 !important; }
+.block-container { padding-top: 1.7rem; padding-bottom: 3rem; max-width: 1500px; }
+.hero {
+  background: linear-gradient(115deg,#102746 0%,#1e5686 65%,#287bb0 100%);
+  padding: 28px 32px; border-radius: 20px; color: white; margin-bottom: 22px;
+  box-shadow: 0 12px 30px rgba(16,39,70,.13);
+}
+.hero h1 { color:white; font-size: 2rem; font-weight:800; margin:0 0 8px 0; }
+.hero p { color:#dcecff; margin:0; font-size: .98rem; }
+.eyebrow { color:#a9d6ff; font-size:.75rem; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; }
+.section-title { color:#163452; font-weight:800; font-size:1.28rem; margin: .3rem 0 .8rem 0; }
+.section-note { color:#6b7f95; font-size:.88rem; margin-top:-5px; margin-bottom:14px; }
+.kpi {
+  background:white; border:1px solid #e5edf5; border-radius:16px;
+  padding:17px 19px; box-shadow:0 5px 18px rgba(26,54,84,.045);
+  min-height:112px;
+}
+.kpi-label { color:#6b7f95; font-size:.82rem; font-weight:600; }
+.kpi-value { color:#163452; font-size:1.65rem; font-weight:800; margin-top:7px; }
+.kpi-foot { color:#91a1b2; font-size:.75rem; margin-top:2px; }
+.panel {
+  background:white; border:1px solid #e5edf5; border-radius:16px;
+  padding:18px 20px; box-shadow:0 5px 18px rgba(26,54,84,.04);
+}
+div[data-testid="stTabs"] button { font-weight:700; }
+.stButton>button[kind="primary"] {
+  background:linear-gradient(90deg,#1769aa,#2588c7); border:0; border-radius:10px;
+  font-weight:700; padding:.62rem 1.1rem;
+}
+div[data-testid="stMetric"] {
+  background:#fff; border:1px solid #e5edf5; padding:14px 16px;
+  border-radius:14px; box-shadow:0 4px 14px rgba(26,54,84,.04);
+}
+div[data-testid="stDataFrame"] { border:1px solid #e5edf5; border-radius:12px; }
+footer {visibility:hidden;}
+</style>
+""", unsafe_allow_html=True)
 
+DATA_PATH = Path(__file__).parent / "Nhóm3_Studentperformanceprediction.xlsx"
+FEATURES = [
+    "gender", "race/ethnicity", "parental level of education",
+    "lunch", "test preparation course",
+    "math score", "reading score", "writing score"
+]
+TARGET = "Grade"
+MODEL_NAMES = ["Logistic Regression", "Decision Tree", "Random Forest"]
+COLORS = ["#2878B5", "#45A6A0", "#F0A44B", "#8B79C6", "#D66B78"]
+
+# ---------------------------------------------------------
+# DATA & MODEL HELPERS
+# ---------------------------------------------------------
 @st.cache_data
-def load_excel(file_or_path):
-    return pd.read_excel(file_or_path)
+def load_data(file_path):
+    return pd.read_excel(file_path)
 
-def train_and_evaluate(data, model_name, test_size, random_state):
-    feature_cols = [
-        "gender", "race/ethnicity", "parental level of education",
-        "lunch", "test preparation course",
-        "math score", "reading score", "writing score"
-    ]
-    target_col = "Grade"
-    X = data[feature_cols].copy()
-    y = data[target_col].astype(str)
-
-    categorical = X.select_dtypes(include=["object", "category"]).columns.tolist()
-    numeric = X.select_dtypes(exclude=["object", "category"]).columns.tolist()
-    transformers = []
-    if categorical:
-        transformers.append(("categorical", Pipeline([
-            ("imputer", SimpleImputer(strategy="most_frequent")),
-            ("onehot", OneHotEncoder(handle_unknown="ignore"))
-        ]), categorical))
-    if numeric:
-        transformers.append(("numeric", Pipeline([
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler())
-        ]), numeric))
-    preprocessor = ColumnTransformer(transformers)
-
+def make_pipeline(model_name, random_state=42):
     if model_name == "Logistic Regression":
-        classifier = LogisticRegression(max_iter=2000, class_weight="balanced")
+        estimator = LogisticRegression(max_iter=2500, class_weight="balanced")
     elif model_name == "Decision Tree":
-        classifier = DecisionTreeClassifier(
+        estimator = DecisionTreeClassifier(
             max_depth=8, min_samples_leaf=4, class_weight="balanced",
             random_state=random_state
         )
     else:
-        classifier = RandomForestClassifier(
-            n_estimators=250, max_depth=10, min_samples_leaf=2,
+        estimator = RandomForestClassifier(
+            n_estimators=300, max_depth=12, min_samples_leaf=2,
             class_weight="balanced", random_state=random_state, n_jobs=-1
         )
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state, stratify=y
-    )
-    evaluation_model = Pipeline([
-        ("preprocessor", preprocessor), ("classifier", classifier)
+    categorical = FEATURES[:5]
+    numeric = FEATURES[5:]
+    preprocess = ColumnTransformer([
+        ("categorical", Pipeline([
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("onehot", OneHotEncoder(handle_unknown="ignore"))
+        ]), categorical),
+        ("numeric", Pipeline([
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler())
+        ]), numeric)
     ])
-    evaluation_model.fit(X_train, y_train)
-    predictions = evaluation_model.predict(X_test)
-    metrics = {
-        "Accuracy": accuracy_score(y_test, predictions),
-        "Precision (weighted)": precision_score(y_test, predictions, average="weighted", zero_division=0),
-        "Recall (weighted)": recall_score(y_test, predictions, average="weighted", zero_division=0),
-        "F1-score (weighted)": f1_score(y_test, predictions, average="weighted", zero_division=0),
-    }
-    final_model = Pipeline([
-        ("preprocessor", preprocessor), ("classifier", classifier)
-    ])
-    final_model.fit(X, y)
-    return final_model, metrics, y_test, predictions
+    return Pipeline([("preprocess", preprocess), ("model", estimator)])
 
+def prepare_data(frame):
+    data = frame.copy()
+    for col in ["math score", "reading score", "writing score"]:
+        data[col] = pd.to_numeric(data[col], errors="coerce")
+    data = data.dropna(subset=[TARGET] + FEATURES[5:])
+    data[TARGET] = data[TARGET].astype(str)
+    return data
+
+@st.cache_data(show_spinner=False)
+def compare_models(data, test_fraction, random_state):
+    X = data[FEATURES].copy()
+    y = data[TARGET].astype(str)
+    x_train, x_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_fraction, random_state=random_state, stratify=y
+    )
+    results, fitted = [], {}
+    for name in MODEL_NAMES:
+        pipe = make_pipeline(name, random_state)
+        pipe.fit(x_train, y_train)
+        pred = pipe.predict(x_test)
+        results.append({
+            "Mô hình": name,
+            "Accuracy": accuracy_score(y_test, pred),
+            "Precision": precision_score(y_test, pred, average="weighted", zero_division=0),
+            "Recall": recall_score(y_test, pred, average="weighted", zero_division=0),
+            "F1-score": f1_score(y_test, pred, average="weighted", zero_division=0)
+        })
+        fitted[name] = (pipe, pred)
+    return pd.DataFrame(results), y_test, fitted
+
+def chart_layout(fig, height=340):
+    fig.update_layout(
+        height=height, margin=dict(l=12, r=12, t=38, b=12),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Be Vietnam Pro, sans-serif", color="#53677d"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    fig.update_xaxes(showgrid=False, linecolor="#e8eef5")
+    fig.update_yaxes(gridcolor="#edf2f7", zeroline=False)
+    return fig
+
+def kpi(label, value, foot=""):
+    st.markdown(
+        f'<div class="kpi"><div class="kpi-label">{label}</div>'
+        f'<div class="kpi-value">{value}</div><div class="kpi-foot">{foot}</div></div>',
+        unsafe_allow_html=True
+    )
+
+# ---------------------------------------------------------
+# LOAD DATA
+# ---------------------------------------------------------
 with st.sidebar:
-    st.header("⚙️ Thiết lập dữ liệu")
-    uploaded = st.file_uploader("Tải lên file Excel (.xlsx)", type=["xlsx"])
-    test_size_pct = st.slider("Tỷ lệ dữ liệu kiểm tra", 10, 40, 20, 5)
-    random_state = st.number_input("Random state", min_value=0, max_value=9999, value=42, step=1)
+    st.markdown("## 🎓 EduPredict")
+    st.caption("STUDENT ANALYTICS PLATFORM")
+    page = st.radio(
+        "ĐIỀU HƯỚNG",
+        ["Tổng quan", "So sánh mô hình", "Dự đoán xếp loại", "Dữ liệu"],
+        label_visibility="visible"
+    )
     st.divider()
-    st.caption("Nếu không tải file mới, ứng dụng sẽ sử dụng file Excel nằm cùng thư mục với app.py.")
+    st.markdown("**CẤU HÌNH**")
+    uploaded = st.file_uploader("Tải dữ liệu Excel", type=["xlsx"])
+    test_pct = st.slider("Tỷ lệ dữ liệu kiểm tra", 10, 40, 20, 5)
+    seed = st.number_input("Random state", min_value=0, max_value=9999, value=42)
+    st.divider()
+    st.caption("Machine Learning • Scikit-learn • Streamlit")
 
 try:
-    if uploaded is not None:
-        df = load_excel(uploaded)
-    elif DEFAULT_FILE.exists():
-        df = load_excel(DEFAULT_FILE)
-    else:
-        st.warning("Chưa tìm thấy file Excel. Hãy tải file dữ liệu lên bằng ô tải tệp ở thanh bên trái.")
-        st.stop()
+    raw = pd.read_excel(uploaded) if uploaded is not None else load_data(DATA_PATH)
 except Exception as exc:
-    st.error(f"Không thể đọc file Excel: {exc}")
+    st.error(f"Không thể đọc dữ liệu: {exc}")
     st.stop()
 
-required_cols = [
-    "gender", "race/ethnicity", "parental level of education",
-    "lunch", "test preparation course", "math score",
-    "reading score", "writing score", "Grade"
-]
-missing = [col for col in required_cols if col not in df.columns]
+required = FEATURES + [TARGET]
+missing = [c for c in required if c not in raw.columns]
 if missing:
-    st.error("File dữ liệu thiếu các cột bắt buộc: " + ", ".join(missing))
+    st.error("Dữ liệu thiếu các cột bắt buộc: " + ", ".join(missing))
     st.stop()
 
-df = df.dropna(subset=["Grade"]).copy()
-for col in ["math score", "reading score", "writing score"]:
-    df[col] = pd.to_numeric(df[col], errors="coerce")
-df = df.dropna(subset=["math score", "reading score", "writing score"])
-if df["Grade"].nunique() < 2:
-    st.error("Cần ít nhất hai nhóm Grade để huấn luyện mô hình.")
+df = prepare_data(raw)
+if df.empty or df[TARGET].nunique() < 2:
+    st.error("Dữ liệu cần có ít nhất hai nhóm xếp loại và các cột điểm hợp lệ.")
     st.stop()
 
-st.success(f"Đã tải dữ liệu thành công: {len(df):,} dòng dữ liệu.")
-tab_overview, tab_model, tab_predict = st.tabs([
-    "📊 Tổng quan dữ liệu", "🧠 Huấn luyện & đánh giá", "🔮 Dự đoán xếp loại"
-])
+# ---------------------------------------------------------
+# HEADER
+# ---------------------------------------------------------
+st.markdown("""
+<div class="hero">
+  <div class="eyebrow">EDUCATION • DATA SCIENCE • MACHINE LEARNING</div>
+  <h1>Student Performance Analytics</h1>
+  <p>Nền tảng phân tích dữ liệu và dự đoán kết quả học tập của sinh viên</p>
+</div>
+""", unsafe_allow_html=True)
 
-with tab_overview:
-    st.subheader("Tổng quan bộ dữ liệu")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Số sinh viên", f"{len(df):,}")
-    c2.metric("Số thuộc tính", len(required_cols) - 1)
-    c3.metric("Số mức xếp loại", df["Grade"].nunique())
-    c4.metric("Dữ liệu thiếu", f"{int(df[required_cols].isna().sum().sum())}")
+grade_order = df[TARGET].value_counts().index.tolist()
+avg_score = df[["math score", "reading score", "writing score"]].mean().mean()
+pass_count = int((~df[TARGET].str.lower().str.contains("fail")).sum())
+pass_rate = pass_count / len(df) * 100
+
+# ---------------------------------------------------------
+# PAGE: OVERVIEW
+# ---------------------------------------------------------
+if page == "Tổng quan":
+    st.markdown('<div class="section-title">Tổng quan học tập</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-note">Bức tranh tổng thể về dữ liệu và kết quả học tập trong bộ dữ liệu.</div>', unsafe_allow_html=True)
+    a, b, c, d = st.columns(4)
+    with a: kpi("TỔNG SỐ SINH VIÊN", f"{len(df):,}", "Bản ghi hợp lệ")
+    with b: kpi("ĐIỂM TRUNG BÌNH", f"{avg_score:.1f}/100", "Trung bình 3 môn")
+    with c: kpi("TỶ LỆ KHÔNG FAIL", f"{pass_rate:.1f}%", "Theo nhãn Grade")
+    with d: kpi("SỐ MỨC XẾP LOẠI", f"{df[TARGET].nunique()}", "Nhóm phân loại")
+
+    st.write("")
+    left, right = st.columns([1.05, 1])
+    with left:
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.markdown("**Phân bố xếp loại sinh viên**")
+        counts = df[TARGET].value_counts().rename_axis("Xếp loại").reset_index(name="Số sinh viên")
+        fig = px.pie(counts, names="Xếp loại", values="Số sinh viên", hole=.62,
+                     color_discrete_sequence=COLORS)
+        fig.update_traces(textposition="outside", textinfo="percent+label",
+                          marker=dict(line=dict(color="white", width=3)))
+        st.plotly_chart(chart_layout(fig, 350), use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    with right:
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.markdown("**Điểm trung bình theo môn học**")
+        scores = pd.DataFrame({
+            "Môn học": ["Toán", "Đọc", "Viết"],
+            "Điểm trung bình": [
+                df["math score"].mean(), df["reading score"].mean(),
+                df["writing score"].mean()
+            ]
+        })
+        fig = px.bar(scores, x="Môn học", y="Điểm trung bình", text_auto=".1f",
+                     color="Môn học", color_discrete_sequence=COLORS)
+        fig.update_traces(textposition="outside", marker_line_width=0)
+        fig.update_yaxes(range=[0, 100], title="")
+        st.plotly_chart(chart_layout(fig, 350), use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    st.write("")
     left, right = st.columns(2)
     with left:
-        st.markdown("**Phân bố xếp loại**")
-        grade_counts = df["Grade"].value_counts().rename_axis("Grade").reset_index(name="Số lượng")
-        st.bar_chart(grade_counts.set_index("Grade"))
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.markdown("**So sánh điểm theo xếp loại**")
+        long_scores = df.melt(id_vars=TARGET, value_vars=["math score", "reading score", "writing score"],
+                              var_name="Môn", value_name="Điểm")
+        long_scores["Môn"] = long_scores["Môn"].map({
+            "math score": "Toán", "reading score": "Đọc", "writing score": "Viết"
+        })
+        fig = px.box(long_scores, x=TARGET, y="Điểm", color=TARGET,
+                     color_discrete_sequence=COLORS, points=False)
+        fig.update_layout(xaxis_title="", yaxis_title="Điểm số")
+        st.plotly_chart(chart_layout(fig, 360), use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
     with right:
-        st.markdown("**Điểm trung bình theo môn**")
-        st.bar_chart(df[["math score", "reading score", "writing score"]].mean())
-    st.markdown("**Bảng dữ liệu**")
-    st.dataframe(df, use_container_width=True, height=350)
-    st.download_button(
-        "⬇️ Tải dữ liệu đang sử dụng (CSV)",
-        data=df.to_csv(index=False).encode("utf-8-sig"),
-        file_name="student_performance_data.csv", mime="text/csv"
-    )
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.markdown("**Cơ cấu khóa luyện thi**")
+        prep = df["test preparation course"].value_counts().rename_axis("Trạng thái").reset_index(name="Số lượng")
+        fig = px.bar(prep, x="Trạng thái", y="Số lượng", color="Trạng thái",
+                     text_auto=True, color_discrete_sequence=["#2878B5", "#45A6A0"])
+        fig.update_layout(xaxis_title="", yaxis_title="")
+        st.plotly_chart(chart_layout(fig, 360), use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-with tab_model:
-    st.subheader("Huấn luyện và đánh giá mô hình")
-    model_name = st.selectbox(
-        "Chọn thuật toán",
-        ["Random Forest", "Logistic Regression", "Decision Tree"]
-    )
-    st.caption(
-        f"Dữ liệu được chia thành {100-test_size_pct}% huấn luyện và "
-        f"{test_size_pct}% kiểm tra. Các chỉ số được tính trên tập kiểm tra."
-    )
-    if st.button("🚀 Huấn luyện mô hình", type="primary"):
-        with st.spinner("Đang huấn luyện và đánh giá..."):
+    st.info("Lưu ý: Average Score không được dùng làm đầu vào mô hình vì đây là điểm tổng hợp từ ba môn, có thể gây rò rỉ dữ liệu mục tiêu.")
+
+# ---------------------------------------------------------
+# PAGE: MODEL COMPARISON
+# ---------------------------------------------------------
+elif page == "So sánh mô hình":
+    st.markdown('<div class="section-title">Huấn luyện & so sánh mô hình</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-note">Ba thuật toán được đánh giá trên cùng một tập kiểm tra để đảm bảo tính công bằng.</div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class="panel">
+    <b>Quy trình đánh giá</b><br>
+    Chia dữ liệu phân tầng theo nhãn Grade → tiền xử lý dữ liệu → huấn luyện 3 mô hình →
+    so sánh Accuracy, Precision, Recall và F1-score (weighted).
+    </div>
+    """, unsafe_allow_html=True)
+    st.write("")
+    if st.button("🚀 Huấn luyện và so sánh cả 3 mô hình", type="primary", use_container_width=False):
+        with st.spinner("Đang huấn luyện và đánh giá các mô hình..."):
             try:
-                model, metrics, y_test, y_pred = train_and_evaluate(
-                    df, model_name, test_size_pct / 100, int(random_state)
-                )
-                st.session_state["trained_model"] = model
-                st.session_state["trained_model_name"] = model_name
-                st.session_state["metrics"] = metrics
-                st.session_state["y_test"] = y_test
-                st.session_state["y_pred"] = y_pred
+                metrics, y_test, fitted = compare_models(df, test_pct / 100, int(seed))
+                st.session_state["comparison_metrics"] = metrics
+                st.session_state["comparison_y_test"] = y_test
+                st.session_state["comparison_fitted"] = fitted
+                st.session_state["comparison_signature"] = (test_pct, int(seed), len(df))
             except Exception as exc:
                 st.error(f"Không thể huấn luyện mô hình: {exc}")
 
-    if "metrics" in st.session_state:
-        st.markdown(f"#### Kết quả: {st.session_state['trained_model_name']}")
-        metric_cols = st.columns(4)
-        for col, (label, value) in zip(metric_cols, st.session_state["metrics"].items()):
-            col.metric(label, f"{value:.3f}")
-        y_test, y_pred = st.session_state["y_test"], st.session_state["y_pred"]
-        labels = sorted(df["Grade"].astype(str).unique())
-        cm = confusion_matrix(y_test, y_pred, labels=labels)
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels).plot(
-            ax=ax, cmap="Blues", xticks_rotation=35, colorbar=False
-        )
-        ax.set_title("Ma trận nhầm lẫn")
-        fig.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
-        report = classification_report(y_test, y_pred, zero_division=0, output_dict=True)
-        st.markdown("**Báo cáo phân loại chi tiết**")
-        st.dataframe(pd.DataFrame(report).transpose().round(3), use_container_width=True)
-        st.info(
-            "Accuracy thể hiện tỷ lệ dự đoán đúng tổng thể. Precision, Recall và "
-            "F1-score weighted phản ánh hiệu quả trên các lớp có xét đến số lượng mẫu. "
-            "Nên xem đồng thời các chỉ số và ma trận nhầm lẫn."
-        )
+    if "comparison_metrics" in st.session_state:
+        metrics = st.session_state["comparison_metrics"]
+        best = metrics.sort_values("F1-score", ascending=False).iloc[0]
+        st.write("")
+        x1, x2, x3 = st.columns(3)
+        with x1: kpi("MÔ HÌNH DẪN ĐẦU", best["Mô hình"], "Theo F1-score weighted")
+        with x2: kpi("F1-SCORE CAO NHẤT", f'{best["F1-score"]:.3f}', "Trên tập kiểm tra")
+        with x3: kpi("ACCURACY", f'{best["Accuracy"]:.3f}', "Tỷ lệ dự đoán đúng")
+        st.write("")
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.markdown("**So sánh các chỉ số đánh giá**")
+        melted = metrics.melt(id_vars="Mô hình", var_name="Chỉ số", value_name="Giá trị")
+        fig = px.bar(melted, x="Mô hình", y="Giá trị", color="Chỉ số", barmode="group",
+                     color_discrete_sequence=COLORS, text_auto=".3f")
+        fig.update_yaxes(range=[0, 1.08], title="Điểm số")
+        fig.update_xaxes(title="")
+        st.plotly_chart(chart_layout(fig, 420), use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.write("")
+        st.markdown("**Bảng kết quả chi tiết**")
+        display = metrics.copy()
+        for col in ["Accuracy", "Precision", "Recall", "F1-score"]:
+            display[col] = display[col].map(lambda v: f"{v:.4f}")
+        st.dataframe(display, use_container_width=True, hide_index=True)
+        st.write("")
+        chosen = st.selectbox("Xem ma trận nhầm lẫn của mô hình", MODEL_NAMES,
+                              index=MODEL_NAMES.index(best["Mô hình"]))
+        y_test = st.session_state["comparison_y_test"]
+        model, pred = st.session_state["comparison_fitted"][chosen]
+        labels = sorted(df[TARGET].astype(str).unique())
+        cm = confusion_matrix(y_test, pred, labels=labels)
+        fig = px.imshow(cm, text_auto=True, x=labels, y=labels,
+                        color_continuous_scale="Blues", aspect="auto")
+        fig.update_layout(xaxis_title="Nhãn dự đoán", yaxis_title="Nhãn thực tế")
+        st.plotly_chart(chart_layout(fig, 430), use_container_width=True)
+        with st.expander("Xem báo cáo phân loại chi tiết"):
+            report = classification_report(y_test, pred, zero_division=0, output_dict=True)
+            st.dataframe(pd.DataFrame(report).transpose().round(3), use_container_width=True)
+        st.session_state["selected_model_name"] = chosen
+        st.session_state["selected_model"] = model
+        st.caption("F1-score weighted là chỉ số tham khảo hữu ích khi số lượng mẫu giữa các nhóm xếp loại không đồng đều.")
     else:
-        st.info("Chọn thuật toán và nhấn **Huấn luyện mô hình** để xem kết quả.")
+        st.info("Nhấn nút **Huấn luyện và so sánh cả 3 mô hình** để xem kết quả đánh giá.")
 
-with tab_predict:
-    st.subheader("Nhập thông tin để dự đoán xếp loại")
-    st.write("Điền thông tin của một sinh viên. Mô hình sẽ dự đoán nhóm xếp loại học tập.")
-    if "trained_model" not in st.session_state:
-        st.warning("Hãy huấn luyện mô hình ở tab **Huấn luyện & đánh giá** trước khi dự đoán.")
+# ---------------------------------------------------------
+# PAGE: PREDICTION
+# ---------------------------------------------------------
+elif page == "Dự đoán xếp loại":
+    st.markdown('<div class="section-title">Dự đoán kết quả học tập</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-note">Nhập thông tin sinh viên để mô hình ước lượng nhóm xếp loại.</div>', unsafe_allow_html=True)
+    if "comparison_fitted" not in st.session_state:
+        st.warning("Em hãy sang trang **So sánh mô hình** và huấn luyện các mô hình trước khi dự đoán.")
     else:
-        with st.form("prediction_form"):
-            a, b = st.columns(2)
-            with a:
+        default_model = st.session_state.get("selected_model_name", "Random Forest")
+        selected = st.selectbox("Chọn mô hình dự đoán", MODEL_NAMES,
+                                index=MODEL_NAMES.index(default_model))
+        model = st.session_state["comparison_fitted"][selected][0]
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        with st.form("student_prediction"):
+            st.markdown("**Thông tin cá nhân & học tập**")
+            c1, c2 = st.columns(2)
+            with c1:
                 gender = st.selectbox("Giới tính", sorted(df["gender"].dropna().astype(str).unique()))
-                race = st.selectbox("Nhóm chủng tộc/sắc tộc", sorted(df["race/ethnicity"].dropna().astype(str).unique()))
-                parent_edu = st.selectbox(
-                    "Trình độ học vấn của phụ huynh",
-                    sorted(df["parental level of education"].dropna().astype(str).unique())
-                )
+                race = st.selectbox("Nhóm sắc tộc", sorted(df["race/ethnicity"].dropna().astype(str).unique()))
+                parent_edu = st.selectbox("Trình độ học vấn phụ huynh",
+                    sorted(df["parental level of education"].dropna().astype(str).unique()))
                 lunch = st.selectbox("Loại bữa ăn", sorted(df["lunch"].dropna().astype(str).unique()))
-            with b:
-                prep = st.selectbox(
-                    "Khóa luyện thi",
-                    sorted(df["test preparation course"].dropna().astype(str).unique())
-                )
-                math_score = st.number_input("Điểm Toán", min_value=0.0, max_value=100.0, value=70.0, step=1.0)
-                reading_score = st.number_input("Điểm Đọc", min_value=0.0, max_value=100.0, value=70.0, step=1.0)
-                writing_score = st.number_input("Điểm Viết", min_value=0.0, max_value=100.0, value=70.0, step=1.0)
-            submitted = st.form_submit_button("🔍 Dự đoán kết quả", type="primary")
+            with c2:
+                prep = st.selectbox("Khóa luyện thi",
+                    sorted(df["test preparation course"].dropna().astype(str).unique()))
+                math_score = st.number_input("Điểm Toán", 0.0, 100.0, 70.0, 1.0)
+                reading_score = st.number_input("Điểm Đọc", 0.0, 100.0, 70.0, 1.0)
+                writing_score = st.number_input("Điểm Viết", 0.0, 100.0, 70.0, 1.0)
+            submitted = st.form_submit_button("🔮 Dự đoán kết quả", type="primary", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
         if submitted:
             sample = pd.DataFrame([{
                 "gender": gender, "race/ethnicity": race,
@@ -235,23 +395,49 @@ with tab_predict:
                 "test preparation course": prep, "math score": math_score,
                 "reading score": reading_score, "writing score": writing_score
             }])
-            model = st.session_state["trained_model"]
             prediction = model.predict(sample)[0]
-            st.success(f"### Kết quả dự đoán: {prediction}")
+            st.write("")
+            st.markdown('<div class="panel">', unsafe_allow_html=True)
+            st.markdown("**KẾT QUẢ DỰ ĐOÁN**")
+            st.markdown(f"<h2 style='color:#1769aa;margin:.3rem 0'>{prediction}</h2>", unsafe_allow_html=True)
+            st.caption(f"Thuật toán sử dụng: {selected}")
             if hasattr(model, "predict_proba"):
-                probabilities = model.predict_proba(sample)[0]
-                probability_df = pd.DataFrame({
-                    "Mức xếp loại": model.classes_, "Xác suất dự đoán": probabilities
-                }).sort_values("Xác suất dự đoán", ascending=False)
-                st.markdown("**Xác suất theo từng mức xếp loại**")
-                display_df = probability_df.copy()
-                display_df["Xác suất dự đoán"] = display_df["Xác suất dự đoán"].map(lambda x: f"{x:.1%}")
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
-                st.bar_chart(probability_df.set_index("Mức xếp loại"))
-            st.caption(
-                "Kết quả chỉ mang tính tham khảo dựa trên dữ liệu và mô hình đã huấn luyện, "
-                "không thay thế đánh giá chính thức của nhà trường."
-            )
+                probs = model.predict_proba(sample)[0]
+                prob_df = pd.DataFrame({"Mức xếp loại": model.classes_, "Xác suất": probs})
+                prob_df = prob_df.sort_values("Xác suất", ascending=True)
+                fig = px.bar(prob_df, x="Xác suất", y="Mức xếp loại", orientation="h",
+                             text=prob_df["Xác suất"].map(lambda v: f"{v:.1%}"),
+                             color="Xác suất", color_continuous_scale="Blues")
+                fig.update_layout(coloraxis_showscale=False, xaxis_tickformat=".0%", xaxis_title="Xác suất")
+                st.plotly_chart(chart_layout(fig, 300), use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            st.caption("Kết quả chỉ mang tính tham khảo dựa trên dữ liệu huấn luyện, không thay thế đánh giá chính thức của nhà trường.")
 
-st.divider()
-st.caption("Student Performance Prediction • Streamlit + Scikit-learn")
+# ---------------------------------------------------------
+# PAGE: DATA
+# ---------------------------------------------------------
+elif page == "Dữ liệu":
+    st.markdown('<div class="section-title">Khám phá bộ dữ liệu</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-note">Kiểm tra dữ liệu đầu vào, bộ lọc và tải dữ liệu phục vụ báo cáo.</div>', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    with c1: kpi("SỐ DÒNG", f"{len(df):,}", "Sau khi làm sạch")
+    with c2: kpi("SỐ CỘT", f"{len(df.columns)}", "Bao gồm cột mục tiêu")
+    with c3: kpi("GIÁ TRỊ THIẾU", f"{int(df[required].isna().sum().sum())}", "Trên các cột sử dụng")
+    selected_grade = st.multiselect("Lọc theo xếp loại", sorted(df[TARGET].unique()),
+                                    default=sorted(df[TARGET].unique()))
+    filtered = df[df[TARGET].isin(selected_grade)]
+    st.dataframe(filtered, use_container_width=True, height=430)
+    st.download_button(
+        "⬇️ Tải dữ liệu đã lọc (CSV)",
+        data=filtered.to_csv(index=False).encode("utf-8-sig"),
+        file_name="student_performance_filtered.csv",
+        mime="text/csv"
+    )
+
+st.markdown("""
+<hr style="border:0;border-top:1px solid #e4ebf2;margin-top:2.5rem">
+<div style="text-align:center;color:#8a9bad;font-size:.78rem">
+  EDUPREDICT • STUDENT PERFORMANCE ANALYTICS<br>
+  Xây dựng với Streamlit & Scikit-learn
+</div>
+""", unsafe_allow_html=True)
